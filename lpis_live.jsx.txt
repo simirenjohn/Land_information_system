@@ -1,0 +1,530 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { Map as MapIcon, Search, Upload, Users, FileText, Eye, Edit3, Scissors, Download, Plus, Check, X, LogOut, ArrowLeft, ChevronRight, Camera, Ruler, BarChart2, Shield, RefreshCw, CheckCircle, XCircle, Square, Circle, Trash2, Activity, Clock, Layers, Filter, Database, Menu } from "lucide-react";
+
+const B = { w0: 35.84, w1: 36.02, s: -1.24, n: -0.94 };
+const SC = {
+  approved: { fill:"rgba(0,212,170,0.22)", stroke:"#00d4aa", bg:"rgba(0,212,170,0.12)", text:"#00d4aa", border:"rgba(0,212,170,0.4)" },
+  pending:  { fill:"rgba(245,158,11,0.22)", stroke:"#f59e0b", bg:"rgba(245,158,11,0.12)", text:"#f59e0b", border:"rgba(245,158,11,0.4)" },
+  draft:    { fill:"rgba(99,102,241,0.22)",  stroke:"#818cf8", bg:"rgba(99,102,241,0.12)", text:"#818cf8", border:"rgba(99,102,241,0.4)" },
+  rejected: { fill:"rgba(239,68,68,0.22)",   stroke:"#ef4444", bg:"rgba(239,68,68,0.12)",  text:"#ef4444", border:"rgba(239,68,68,0.4)" },
+};
+
+function g2p(lng, lat, W, H, pan, zoom) {
+  const nx = (lng - B.w0) / (B.w1 - B.w0);
+  const ny = 1 - (lat - B.s) / (B.n - B.s);
+  return [nx * W * zoom + pan.x, ny * H * zoom + pan.y];
+}
+function pip(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if (((yi > py) !== (yj > py)) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function fmtArea(m2) { if (!m2) return "—"; return m2 >= 10000 ? (m2/10000).toFixed(2)+" ha" : m2.toLocaleString()+" m²"; }
+function fmtDate(d) { if (!d) return "Not registered"; return new Date(d).toLocaleDateString("en-KE",{day:"2-digit",month:"short",year:"numeric"}); }
+
+const SEED_PARCELS = [
+  {id:"p1",num:"NAROK/CENTRAL/0044",owner:"Mary Nkoisoi",idNo:"12345678",addr:"Narok Town, Narok North",use:"Agricultural",date:"2021-01-14",area:32500,status:"approved",tenure:"Freehold",encumb:"None",sub:"Narok North",ring:[[35.902,-1.068],[35.924,-1.068],[35.924,-1.088],[35.902,-1.088]],by:"u2",photos:[],docs:[],note:""},
+  {id:"p2",num:"NAROK/CENTRAL/0891",owner:"James Ole Tipis",idNo:"23456789",addr:"Narok North",use:"Residential",date:null,area:18000,status:"pending",tenure:"Leasehold 99yr",encumb:"Survey incomplete",sub:"Narok North",ring:[[35.926,-1.068],[35.946,-1.068],[35.946,-1.083],[35.926,-1.083]],by:"u2",photos:[],docs:[],note:""},
+  {id:"p3",num:"NAROK/TRANSMARA/0217",owner:"Samuel Saitoti",idNo:"34567890",addr:"Transmara East",use:"Agricultural",date:"2019-06-03",area:84000,status:"approved",tenure:"Freehold",encumb:"Caution — Grace Ntimama",sub:"Transmara East",ring:[[35.858,-1.095],[35.884,-1.095],[35.884,-1.128],[35.858,-1.128]],by:"u3",photos:[],docs:[],note:"Boundary dispute resolved 2022"},
+  {id:"p4",num:"NAROK/NORTH/1100",owner:"Grace Wanjiku",idNo:"45678901",addr:"Narok North",use:"Commercial",date:"2023-08-22",area:5000,status:"approved",tenure:"Leasehold 50yr",encumb:"Charge — KCB Bank",sub:"Narok North",ring:[[35.948,-1.070],[35.958,-1.070],[35.958,-1.080],[35.948,-1.080]],by:"u2",photos:[],docs:[],note:""},
+  {id:"p5",num:"NAROK/CENTRAL/1311",owner:"David Kiprono",idNo:"56789012",addr:"Narok South",use:"Agricultural",date:"2026-01-05",area:21000,status:"approved",tenure:"Freehold",encumb:"None",sub:"Narok South",ring:[[35.902,-1.090],[35.924,-1.090],[35.924,-1.108],[35.902,-1.108]],by:"u2",photos:[],docs:[],note:""},
+  {id:"p6",num:"NAROK/SOUTH/0055",owner:"Agnes Rotich",idNo:"67890123",addr:"Narok South",use:"Agricultural",date:"2020-03-11",area:50000,status:"approved",tenure:"Freehold",encumb:"None",sub:"Narok South",ring:[[35.926,-1.090],[35.962,-1.090],[35.962,-1.116],[35.926,-1.116]],by:"u3",photos:[],docs:[],note:""},
+  {id:"p7",num:"NAROK/WEST/0312",owner:"Peter Ntimama",idNo:"78901234",addr:"Narok West",use:"Conservation",date:null,area:123000,status:"draft",tenure:"Government",encumb:"Boundary dispute filed",sub:"Narok West",ring:[[35.848,-1.148],[35.870,-1.148],[35.870,-1.185],[35.848,-1.185]],by:"u2",photos:[],docs:[],note:"Needs field verification"},
+  {id:"p8",num:"NAROK/EAST/0199",owner:"Lucy Kosgei",idNo:"89012345",addr:"Narok East",use:"Residential",date:null,area:8000,status:"pending",tenure:"Leasehold 99yr",encumb:"Title deed processing",sub:"Narok East",ring:[[35.968,-1.072],[35.982,-1.072],[35.982,-1.082],[35.968,-1.082]],by:"u2",photos:[],docs:[],note:""},
+];
+const SEED_USERS = [
+  {id:"u1",name:"Admin Wekesa",email:"admin@lpis.ke",role:"admin",joined:"Jan 2024",active:true},
+  {id:"u2",name:"Surveyor Kamau",email:"kamau@lpis.ke",role:"surveyor",joined:"Feb 2024",active:true},
+  {id:"u3",name:"Surveyor Akinyi",email:"akinyi@lpis.ke",role:"surveyor",joined:"Mar 2024",active:true},
+  {id:"u4",name:"Mwangi",email:"mwangi@lpis.ke",role:"public",joined:"Apr 2024",active:true},
+];
+const SEED_AUDIT = [
+  {id:"a1",act:"APPROVED",detail:"NAROK/CENTRAL/0044 approved and published",actor:"admin@lpis.ke",ts:"2026-05-10T08:00:00Z"},
+  {id:"a2",act:"SUBMITTED",detail:"NAROK/CENTRAL/0891 submitted for review",actor:"kamau@lpis.ke",ts:"2026-05-09T14:22:00Z"},
+  {id:"a3",act:"ROLE_CHANGE",detail:"akinyi@lpis.ke promoted to surveyor",actor:"admin@lpis.ke",ts:"2026-05-08T10:05:00Z"},
+  {id:"a4",act:"APPROVED",detail:"NAROK/NORTH/1100 approved and published",actor:"admin@lpis.ke",ts:"2026-05-07T09:14:00Z"},
+  {id:"a5",act:"REJECTED",detail:"NAROK/WEST/0312 rejected – incomplete boundary data",actor:"admin@lpis.ke",ts:"2026-05-06T11:33:00Z"},
+];
+
+function Badge({ status }) {
+  const c = SC[status] || SC.draft;
+  return <span style={{background:c.bg,color:c.text,border:`1px solid ${c.border}`}} className="text-xs font-mono px-2 py-0.5 rounded-full">{status.toUpperCase()}</span>;
+}
+function RoleBadge({ role }) {
+  const map = {admin:"bg-blue-500/15 text-blue-400 border border-blue-500/30",surveyor:"bg-amber-500/15 text-amber-400 border border-amber-500/30",public:"bg-gray-700/50 text-gray-400 border border-gray-600/50"};
+  const ico = {admin:"🛡",surveyor:"🗺",public:"👤"};
+  return <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${map[role]||map.public}`}>{ico[role]||"👤"} {role.toUpperCase()}</span>;
+}
+function Inp({ label, value, onChange, placeholder, type="text", readonly }) {
+  return (
+    <div>
+      <label className="block text-xs text-gray-500 font-mono uppercase tracking-wider mb-1.5">{label}</label>
+      <input type={type} value={value} onChange={e=>onChange?.(e.target.value)} placeholder={placeholder} readOnly={readonly}
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-teal-500"
+        style={readonly?{color:"#00d4aa",fontFamily:"monospace"}:{}}/>
+    </div>
+  );
+}
+function Sel({ label, value, onChange, opts }) {
+  return (
+    <div>
+      <label className="block text-xs text-gray-500 font-mono uppercase tracking-wider mb-1.5">{label}</label>
+      <select value={value} onChange={e=>onChange(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-teal-500">
+        {opts.map(o=><option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+function Toast({ msg, err }) {
+  if (!msg) return null;
+  return <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:9999}} className={`font-bold text-sm px-5 py-2.5 rounded-xl shadow-2xl ${err?"bg-red-500 text-white":"bg-teal-400 text-black"}`}>{msg}</div>;
+}
+function AuthWall({ go, role="surveyor" }) {
+  return (
+    <div className="min-h-96 flex flex-col items-center justify-center text-center p-8 gap-4">
+      <Shield size={40} className="text-gray-700"/>
+      <h2 className="text-xl font-bold text-white">Access Restricted</h2>
+      <p className="text-gray-400 text-sm">Sign in as <span className="text-teal-400 font-mono">{role}</span> or admin to continue.</p>
+      <button onClick={()=>go("login")} className="bg-teal-500 hover:bg-teal-400 text-black font-bold px-6 py-2.5 rounded-xl text-sm">Sign In</button>
+    </div>
+  );
+}
+
+function MapCanvas({ parcels=[], selectedId, highlightIds=[], onSelect, tool="select", onToolAction, drawPoints=[], bufferParcel=null, bufferDist=0, height=420 }) {
+  const wrapRef = useRef(null);
+  const canRef  = useRef(null);
+  const [pan, setPan]   = useState({x:0,y:0});
+  const [zoom, setZoom] = useState(1);
+  const drag = useRef({active:false,sx:0,sy:0,px:0,py:0,moved:false});
+  const stateRef = useRef({pan:{x:0,y:0},zoom:1});
+  useEffect(()=>{stateRef.current.pan=pan;},[pan]);
+  useEffect(()=>{stateRef.current.zoom=zoom;},[zoom]);
+
+  useEffect(()=>{
+    const wrap=wrapRef.current,c=canRef.current;
+    if(!wrap||!c)return;
+    const sync=()=>{c.width=wrap.offsetWidth;c.height=wrap.offsetHeight;};
+    sync();
+    const ro=new ResizeObserver(sync);
+    ro.observe(wrap);
+    return()=>ro.disconnect();
+  },[]);
+
+  useEffect(()=>{
+    const c=canRef.current;
+    if(!c||!c.width||!c.height)return;
+    const ctx=c.getContext("2d");
+    const W=c.width,H=c.height,p=pan,z=zoom;
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle="#0d1117";ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle="rgba(31,45,64,0.55)";ctx.lineWidth=1;
+    for(let x=0;x<W;x+=32){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+    for(let y=0;y<H;y+=32){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+    const roads=[[[35.84,-1.075],[35.91,-1.077],[35.96,-1.079],[36.02,-1.082]],[[35.915,-0.94],[35.912,-1.05],[35.910,-1.13],[35.908,-1.24]],[[35.86,-1.10],[35.92,-1.09],[35.96,-1.09],[36.02,-1.096]]];
+    roads.forEach(road=>{
+      ctx.beginPath();road.forEach(([lng,lat],i)=>{const[x,y]=g2p(lng,lat,W,H,p,z);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+      ctx.strokeStyle="rgba(100,120,145,0.28)";ctx.lineWidth=2;ctx.stroke();
+    });
+    parcels.forEach(pr=>{
+      if(!pr.ring?.length)return;
+      const isSel=pr.id===selectedId,isHL=highlightIds.includes(pr.id),col=SC[pr.status]||SC.approved;
+      const pix=pr.ring.map(([lng,lat])=>g2p(lng,lat,W,H,p,z));
+      ctx.beginPath();ctx.moveTo(pix[0][0],pix[0][1]);pix.slice(1).forEach(([x,y])=>ctx.lineTo(x,y));ctx.closePath();
+      ctx.fillStyle=isSel?col.stroke+"55":isHL?col.stroke+"33":col.fill;ctx.fill();
+      if(isSel){ctx.shadowColor=col.stroke;ctx.shadowBlur=10;}
+      ctx.strokeStyle=col.stroke+(isSel?"":"99");ctx.lineWidth=isSel?2.5:1.5;ctx.stroke();ctx.shadowBlur=0;
+      const cx=pix.reduce((a,b)=>a+b[0],0)/pix.length,cy=pix.reduce((a,b)=>a+b[1],0)/pix.length;
+      ctx.fillStyle=isSel?"#fff":col.stroke;ctx.font=(isSel?"bold ":"")+"9px monospace";ctx.textAlign="center";
+      ctx.fillText(pr.num.split("/").pop(),cx,cy+3);
+    });
+    if(bufferParcel?.ring&&bufferDist>0){
+      const pix=bufferParcel.ring.map(([lng,lat])=>g2p(lng,lat,W,H,p,z));
+      const cx=pix.reduce((a,b)=>a+b[0],0)/pix.length,cy=pix.reduce((a,b)=>a+b[1],0)/pix.length;
+      const mPerPx=((B.n-B.s)*111320)/H/z,rPx=bufferDist/mPerPx;
+      ctx.beginPath();ctx.arc(cx,cy,rPx,0,Math.PI*2);
+      ctx.strokeStyle="#3b82f6";ctx.lineWidth=1.5;ctx.setLineDash([5,4]);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle="rgba(59,130,246,0.06)";ctx.fill();
+      ctx.fillStyle="#3b82f6";ctx.font="8px monospace";ctx.textAlign="center";
+      ctx.fillText(bufferDist+"m buffer",cx,cy-rPx-6);
+    }
+    if(drawPoints.length>0){
+      ctx.beginPath();ctx.moveTo(drawPoints[0].x,drawPoints[0].y);drawPoints.slice(1).forEach(pt=>ctx.lineTo(pt.x,pt.y));
+      if(drawPoints.length>2){ctx.closePath();ctx.fillStyle="rgba(255,255,255,0.05)";ctx.fill();}
+      ctx.strokeStyle="#fff";ctx.lineWidth=2;ctx.setLineDash([5,3]);ctx.stroke();ctx.setLineDash([]);
+      drawPoints.forEach((pt,i)=>{ctx.beginPath();ctx.arc(pt.x,pt.y,i===0?5:4,0,Math.PI*2);ctx.fillStyle=i===0?"#fff":"#00d4aa";ctx.fill();});
+    }
+    ctx.fillStyle="#4b5563";ctx.font="9px monospace";ctx.textAlign="right";ctx.fillText("N ↑",W-8,17);
+    ctx.strokeStyle="#374151";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(10,H-12);ctx.lineTo(52,H-12);ctx.stroke();
+    ctx.fillStyle="#4b5563";ctx.font="7px monospace";ctx.textAlign="center";ctx.fillText("~2 km",31,H-3);
+  },[parcels,selectedId,highlightIds,pan,zoom,drawPoints,bufferParcel,bufferDist]);
+
+  function getXY(src){const r=canRef.current.getBoundingClientRect();return{x:src.clientX-r.left,y:src.clientY-r.top};}
+  function onDown(e){const src=e.touches?e.touches[0]:e;const{x,y}=getXY(src);drag.current={active:true,sx:x,sy:y,px:stateRef.current.pan.x,py:stateRef.current.pan.y,moved:false};}
+  function onMove(e){if(!drag.current.active)return;const src=e.touches?e.touches[0]:e;const{x,y}=getXY(src);const dx=x-drag.current.sx,dy=y-drag.current.sy;if(Math.abs(dx)+Math.abs(dy)>4)drag.current.moved=true;setPan({x:drag.current.px+dx,y:drag.current.py+dy});}
+  function onUp(e){const src=e.changedTouches?e.changedTouches[0]:e;const{x,y}=getXY(src);const was=drag.current.moved;drag.current.active=false;if(was)return;
+    if(["draw","measure","split"].includes(tool)){onToolAction?.({type:"POINT",x,y});return;}
+    if(["select","buffer"].includes(tool)){const c=canRef.current;const W=c.width,H=c.height;const{pan:pp,zoom:zz}=stateRef.current;let hit=null;[...parcels].reverse().forEach(pr=>{if(hit||!pr.ring)return;const pix=pr.ring.map(([lng,lat])=>g2p(lng,lat,W,H,pp,zz));if(pip(x,y,pix))hit=pr;});onSelect?.(hit);}
+  }
+  const hStyle=typeof height==="number"?height+"px":height;
+  return (
+    <div ref={wrapRef} style={{height:hStyle,position:"relative",overflow:"hidden",background:"#0d1117",borderRadius:8}}>
+      <canvas ref={canRef} style={{position:"absolute",inset:0,cursor:["select","buffer"].includes(tool)?"pointer":"crosshair"}}
+        onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={()=>{drag.current.active=false;}}
+        onTouchStart={e=>{e.preventDefault();onDown(e);}} onTouchMove={e=>{e.preventDefault();onMove(e);}} onTouchEnd={e=>{e.preventDefault();onUp(e);}}/>
+      <div style={{position:"absolute",top:8,right:8,display:"flex",flexDirection:"column",gap:4}}>
+        {[["＋",()=>setZoom(z=>Math.min(6,z*1.4))],["－",()=>setZoom(z=>Math.max(0.3,z/1.4))],["⊡",()=>{setZoom(1);setPan({x:0,y:0});}]].map(([l,fn],i)=>(
+          <button key={i} onClick={fn} style={{width:28,height:28,background:"rgba(15,23,36,0.92)",border:"1px solid #374151",borderRadius:6,color:i===2?"#00d4aa":"#d1d5db",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>{l}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Nav({ page, go, user, setUser }) {
+  const [mob,setMob]=useState(false);
+  const isSurv=user?.role==="surveyor"||user?.role==="admin";
+  const isAdmin=user?.role==="admin";
+  const links=[{t:"map",l:"Map",I:MapIcon,show:true},{t:"dashboard",l:"Dashboard",I:BarChart2,show:isSurv},{t:"digitize",l:"Digitize",I:Camera,show:isSurv},{t:"editor",l:"GIS Editor",I:Edit3,show:isSurv},{t:"admin-users",l:"Users",I:Users,show:isAdmin},{t:"admin-review",l:"Review",I:CheckCircle,show:isAdmin}];
+  return (
+    <nav className="bg-gray-900 border-b border-gray-800 sticky top-0 z-50">
+      <div className="px-4 h-14 flex items-center gap-3">
+        <button onClick={()=>go("landing")} className="flex items-center gap-2 shrink-0">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs text-black" style={{background:"linear-gradient(135deg,#00d4aa,#3b82f6)"}}>LP</div>
+          <span className="text-white font-bold font-mono text-sm hidden sm:block">LPIS Kenya</span>
+        </button>
+        <div className="hidden md:flex items-center gap-0.5 ml-3">
+          {links.filter(l=>l.show).map(l=>(
+            <button key={l.t} onClick={()=>go(l.t)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${page===l.t?"bg-teal-500/10 text-teal-400":"text-gray-400 hover:text-white hover:bg-gray-800"}`}>
+              <l.I size={13}/>{l.l}
+            </button>
+          ))}
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          {user?(<><RoleBadge role={user.role}/><span className="text-gray-400 text-sm hidden lg:block truncate max-w-32">{user.name}</span><button onClick={()=>{setUser(null);go("landing");}} className="text-gray-600 hover:text-white"><LogOut size={15}/></button></>):(<button onClick={()=>go("login")} className="bg-teal-500 hover:bg-teal-400 text-black font-bold text-sm px-4 py-1.5 rounded-lg">Sign In</button>)}
+          <button className="md:hidden text-gray-400 hover:text-white" onClick={()=>setMob(v=>!v)}><Menu size={18}/></button>
+        </div>
+      </div>
+      {mob&&(<div className="md:hidden bg-gray-900 border-t border-gray-800 px-4 pb-4 flex flex-col gap-1">
+        {links.filter(l=>l.show).map(l=>(<button key={l.t} onClick={()=>{go(l.t);setMob(false);}} className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm ${page===l.t?"text-teal-400 bg-teal-500/10":"text-gray-300 hover:bg-gray-800"}`}><l.I size={14}/>{l.l}</button>))}
+      </div>)}
+    </nav>
+  );
+}
+
+function LandingPage({ go, user }) {
+  return (
+    <div className="min-h-screen bg-gray-950">
+      <div className="relative py-20 px-4 text-center overflow-hidden bg-gray-900 border-b border-gray-800">
+        <div className="absolute inset-0 pointer-events-none" style={{backgroundImage:"linear-gradient(rgba(0,212,170,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,170,0.06) 1px,transparent 1px)",backgroundSize:"44px 44px"}}/>
+        <div className="relative max-w-2xl mx-auto">
+          <div className="inline-flex items-center gap-2 bg-teal-500/10 border border-teal-500/25 text-teal-400 text-xs font-mono px-3 py-1 rounded-full mb-6">
+            <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse"/>Narok County · Kenya
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 leading-tight">Land Parcel<br/><span className="text-teal-400">Information System</span></h1>
+          <p className="text-gray-400 text-lg mb-8 max-w-lg mx-auto">Digitize hardcopy survey maps, store records securely in the cloud, and provide instant public access to land parcel data.</p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button onClick={()=>go("map")} className="bg-teal-500 hover:bg-teal-400 text-black font-bold px-7 py-3 rounded-xl text-sm transition-colors">Explore Map →</button>
+            {!user&&<button onClick={()=>go("login")} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white font-medium px-7 py-3 rounded-xl text-sm transition-colors">Sign In</button>}
+          </div>
+        </div>
+      </div>
+      <div className="max-w-5xl mx-auto px-4 py-14">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-14">
+          {[{v:"4,821",l:"Registered Parcels",c:"text-teal-400"},{v:"143",l:"Pending Review",c:"text-amber-400"},{v:"89",l:"Digitized Maps",c:"text-blue-400"},{v:"6",l:"Sub-counties",c:"text-purple-400"}].map(s=>(
+            <div key={s.l} className="bg-gray-900 border border-gray-800 rounded-2xl p-5 text-center">
+              <div className={`text-3xl font-bold font-mono ${s.c}`}>{s.v}</div>
+              <div className="text-gray-500 text-xs mt-1.5">{s.l}</div>
+            </div>
+          ))}
+        </div>
+        <div className="grid md:grid-cols-3 gap-5 mb-14">
+          {[{e:"🔍",t:"Search & Explore",d:"Find any parcel by ID, owner name, sub-county, or land use on the interactive map with real-time filtering."},{e:"📷",t:"Capture & Digitize",d:"Photograph hardcopy maps, set ground control points for georeferencing, and trace parcel boundaries on your phone."},{e:"🛠",t:"GIS Toolkit",d:"Subdivide parcels, measure areas, compute buffers, draw new boundaries, and export GeoJSON or Shapefile."}].map(f=>(
+            <div key={f.t} className="bg-gray-900 border border-gray-800 rounded-2xl p-6 hover:border-gray-700 transition-colors">
+              <div className="text-3xl mb-3">{f.e}</div>
+              <h3 className="font-bold text-white mb-2">{f.t}</h3>
+              <p className="text-gray-400 text-sm leading-relaxed">{f.d}</p>
+            </div>
+          ))}
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-800 flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-teal-400"/>
+            <span className="text-xs font-mono text-gray-400 uppercase tracking-wider">Live Map Preview — Narok County</span>
+          </div>
+          <MapCanvas parcels={SEED_PARCELS.filter(p=>p.status==="approved")} tool="select" height={300}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoginPage({ go, setUser }) {
+  const [email,setEmail]=useState(""),[ pass,setPass]=useState(""),[ tab,setTab]=useState("login");
+  const demos=[{label:"🛡 Admin — full access",u:{id:"u1",name:"Admin Wekesa",email:"admin@lpis.ke",role:"admin"}},{label:"🗺 Surveyor — digitize & edit",u:{id:"u2",name:"Surveyor Kamau",email:"kamau@lpis.ke",role:"surveyor"}},{label:"👤 Public — browse & search",u:{id:"u4",name:"Mwangi",email:"mwangi@lpis.ke",role:"public"}}];
+  function login(u){setUser(u);go(u.role==="admin"||u.role==="surveyor"?"dashboard":"map");}
+  return (
+    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-black font-bold text-2xl mx-auto mb-4" style={{background:"linear-gradient(135deg,#00d4aa,#3b82f6)"}}>LP</div>
+          <h1 className="text-2xl font-bold text-white">LPIS Kenya</h1>
+          <p className="text-gray-500 text-sm mt-1">Land Parcel Information System</p>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 mb-4">
+          <p className="text-xs text-gray-600 font-mono uppercase tracking-wider mb-3">⚡ Demo — click to sign in instantly</p>
+          <div className="flex flex-col gap-2">
+            {demos.map(d=>(<button key={d.label} onClick={()=>login(d.u)} className="w-full py-2.5 px-4 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-teal-500/40 text-sm font-medium text-white text-left transition-all flex items-center justify-between">{d.label}<ChevronRight size={14} className="text-gray-500"/></button>))}
+          </div>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+          <div className="flex bg-gray-800 rounded-lg p-1 mb-4">
+            {["login","signup"].map(t=>(<button key={t} onClick={()=>setTab(t)} className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${tab===t?"bg-teal-500 text-black":"text-gray-400 hover:text-white"}`}>{t==="login"?"Sign In":"Sign Up"}</button>))}
+          </div>
+          <div className="flex flex-col gap-3">
+            <input value={email} onChange={e=>setEmail(e.target.value)} type="email" placeholder="Email address" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-teal-500"/>
+            <input value={pass} onChange={e=>setPass(e.target.value)} type="password" placeholder="Password" className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-teal-500"/>
+            <button onClick={()=>login({id:"u9",name:email.split("@")[0]||"User",email,role:"public"})} className="w-full bg-teal-500 hover:bg-teal-400 text-black font-bold py-2.5 rounded-lg text-sm transition-colors">{tab==="login"?"Sign In":"Create Account"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MapPage({ go, parcels, setPageParcel }) {
+  const [search,setSearch]=useState(""),[ filterUse,setFilterUse]=useState(""),[ filterSt,setFilterSt]=useState(""),[ selected,setSelected]=useState(null);
+  const highlighted=useMemo(()=>{if(!search.trim())return[];const q=search.toLowerCase();return parcels.filter(p=>p.num.toLowerCase().includes(q)||p.owner.toLowerCase().includes(q)||p.sub.toLowerCase().includes(q)||p.use.toLowerCase().includes(q)).map(p=>p.id);},[search,parcels]);
+  const filtered=useMemo(()=>parcels.filter(p=>{if(filterUse&&p.use!==filterUse)return false;if(filterSt&&p.status!==filterSt)return false;return true;}),[parcels,filterUse,filterSt]);
+  function viewParcel(p){setPageParcel(p);go("parcel");}
+  return (
+    <div className="flex" style={{height:"calc(100vh - 56px)"}}>
+      <div className="w-72 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col" style={{maxHeight:"100%"}}>
+        <div className="p-3 border-b border-gray-800 shrink-0">
+          <div className="relative mb-2"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Parcel No., Owner, Location…" className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-teal-500"/></div>
+          <div className="flex gap-2">
+            <select value={filterUse} onChange={e=>setFilterUse(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none"><option value="">All Uses</option>{["Agricultural","Residential","Commercial","Conservation"].map(o=><option key={o}>{o}</option>)}</select>
+            <select value={filterSt} onChange={e=>setFilterSt(e.target.value)} className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs text-gray-300 focus:outline-none"><option value="">All Status</option>{["approved","pending","draft","rejected"].map(o=><option key={o}>{o}</option>)}</select>
+          </div>
+          <div className="text-xs text-gray-600 font-mono mt-1.5">{filtered.length} parcels</div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length===0&&<div className="text-center py-10 text-gray-600 text-sm">No parcels match</div>}
+          {filtered.map(p=>(<div key={p.id} onClick={()=>setSelected(p)} className={`px-3 py-3 border-b border-gray-800 cursor-pointer hover:bg-gray-800/50 transition-colors ${selected?.id===p.id?"bg-teal-500/5 border-l-2 border-l-teal-500":""}`}><div className="flex items-start justify-between gap-2"><div className="flex-1 min-w-0"><div className="font-mono text-xs text-teal-400 truncate">{p.num}</div><div className="text-sm font-medium text-white mt-0.5 truncate">{p.owner}</div><div className="text-xs text-gray-500 mt-0.5">{p.use} · {fmtArea(p.area)}</div></div><Badge status={p.status}/></div></div>))}
+        </div>
+      </div>
+      <div className="flex-1 relative">
+        <MapCanvas parcels={filtered} selectedId={selected?.id} highlightIds={highlighted} onSelect={p=>setSelected(p)} tool="select" height="100%"/>
+        {selected&&(<div style={{position:"absolute",bottom:16,left:"50%",transform:"translateX(-50%)",width:"calc(100% - 32px)",maxWidth:420,zIndex:10}}>
+          <div className="bg-gray-900/95 backdrop-blur border border-gray-700 rounded-2xl p-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="flex-1 min-w-0"><div className="font-mono text-xs text-teal-400">{selected.num}</div><div className="font-bold text-white mt-0.5">{selected.owner}</div><div className="text-sm text-gray-400 mt-1">{selected.use} · {fmtArea(selected.area)} · {selected.tenure}</div></div>
+              <div className="flex items-center gap-2 shrink-0"><Badge status={selected.status}/><button onClick={()=>setSelected(null)} className="text-gray-600 hover:text-white"><X size={14}/></button></div>
+            </div>
+            <button onClick={()=>viewParcel(selected)} className="mt-3 w-full bg-teal-500 hover:bg-teal-400 text-black font-bold text-xs py-2 rounded-lg transition-colors">View Full Record →</button>
+          </div>
+        </div>)}
+      </div>
+    </div>
+  );
+}
+
+function ParcelDetailPage({ go, parcel, user }) {
+  if(!parcel)return(<div className="p-8 text-center text-gray-500">No parcel selected. <button onClick={()=>go("map")} className="text-teal-400 underline">Go to Map</button></div>);
+  const fields=[["Parcel Number",parcel.num],["Owner",parcel.owner],["ID Number",parcel.idNo],["Land Use",parcel.use],["Area",fmtArea(parcel.area)],["Tenure",parcel.tenure],["Registration Date",fmtDate(parcel.date)],["Sub-county",parcel.sub],["County","Narok"],["Status",parcel.status.toUpperCase()],["Encumbrances",parcel.encumb||"None"]];
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6">
+      <button onClick={()=>go("map")} className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-6 transition-colors"><ArrowLeft size={14}/>Back to Map</button>
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <Badge status={parcel.status}/><span className="font-mono text-teal-400 text-sm">{parcel.num}</span>
+        {(user?.role==="surveyor"||user?.role==="admin")&&(<button onClick={()=>go("editor")} className="ml-auto flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"><Edit3 size={11}/>Edit in GIS Editor</button>)}
+      </div>
+      <h1 className="text-2xl font-bold text-white mb-1">{parcel.owner}</h1>
+      <p className="text-gray-400 text-sm mb-6">{parcel.addr}</p>
+      <div className="grid md:grid-cols-5 gap-5">
+        <div className="md:col-span-3 space-y-5">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl divide-y divide-gray-800">
+            {fields.map(([k,v])=>(<div key={k} className="flex items-center justify-between px-5 py-3 gap-4"><span className="text-xs text-gray-500 font-mono uppercase tracking-wider shrink-0">{k}</span><span className="text-sm text-white text-right">{v}</span></div>))}
+          </div>
+          {parcel.note&&(<div className="bg-gray-900 border border-gray-800 rounded-2xl p-5"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-2">Notes</div><div className="text-sm text-gray-300">{parcel.note}</div></div>)}
+        </div>
+        <div className="md:col-span-2 space-y-4">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden"><MapCanvas parcels={[parcel]} selectedId={parcel.id} tool="select" height={220}/><div className="px-4 py-2 text-xs font-mono text-gray-600">EPSG:4326 · Narok County</div></div>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+            <div className="font-bold text-white text-sm mb-3">Documents & Photos</div>
+            {parcel.photos?.length===0&&parcel.docs?.length===0&&(<div className="text-gray-600 text-sm text-center py-4 border border-dashed border-gray-800 rounded-xl">No attachments</div>)}
+            {(user?.role==="surveyor"||user?.role==="admin")&&(<button className="mt-2 w-full border border-dashed border-gray-700 hover:border-teal-500/50 text-gray-500 hover:text-teal-400 text-xs py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2"><Plus size={11}/>Attach Document</button>)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardPage({ go, parcels, user, audit }) {
+  if(!user)return<AuthWall go={go}/>;
+  const mine=parcels.filter(p=>p.by===user.id||user.role==="admin");
+  const stats={total:mine.length,approved:mine.filter(p=>p.status==="approved").length,pending:mine.filter(p=>p.status==="pending").length,draft:mine.filter(p=>p.status==="draft").length};
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div><h1 className="text-2xl font-bold text-white">Dashboard</h1><p className="text-gray-400 text-sm mt-0.5">Welcome back, <span className="text-teal-400">{user.name}</span></p></div>
+        <button onClick={()=>go("digitize")} className="flex items-center gap-2 bg-teal-500 hover:bg-teal-400 text-black font-bold text-sm px-4 py-2.5 rounded-xl transition-colors"><Plus size={14}/>New Submission</button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        {[{v:stats.total,l:"My Parcels",c:"text-white"},{v:stats.approved,l:"Approved",c:"text-teal-400"},{v:stats.pending,l:"Pending",c:"text-amber-400"},{v:stats.draft,l:"Drafts",c:"text-indigo-400"}].map(s=>(<div key={s.l} className="bg-gray-900 border border-gray-800 rounded-2xl p-5"><div className={`text-3xl font-bold font-mono ${s.c}`}>{s.v}</div><div className="text-gray-500 text-xs mt-1.5">{s.l}</div></div>))}
+      </div>
+      <div className="grid md:grid-cols-3 gap-5 mb-6">
+        {[{t:"Digitize New Map",d:"Upload photo & trace boundary",I:Camera,page:"digitize",c:"teal"},{t:"GIS Editor",d:"Draw, subdivide & measure",I:Edit3,page:"editor",c:"amber"},{t:"View Public Map",d:"Browse all registered parcels",I:MapIcon,page:"map",c:"blue"}].map(a=>(<button key={a.t} onClick={()=>go(a.page)} className="bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-2xl p-5 text-left transition-colors"><a.I size={20} className={`mb-3 ${a.c==="teal"?"text-teal-400":a.c==="amber"?"text-amber-400":"text-blue-400"}`}/><div className="font-bold text-white text-sm">{a.t}</div><div className="text-gray-500 text-xs mt-1">{a.d}</div></button>))}
+      </div>
+      <div className="grid md:grid-cols-2 gap-5">
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-800 font-bold text-white text-sm">My Submissions</div>
+          <div className="divide-y divide-gray-800">
+            {mine.slice(0,6).map(p=>(<div key={p.id} className="px-5 py-3.5 hover:bg-gray-800/40 cursor-pointer flex items-center gap-3 transition-colors"><div className="flex-1 min-w-0"><div className="font-mono text-xs text-teal-400 truncate">{p.num}</div><div className="text-sm text-gray-300 mt-0.5 truncate">{p.owner} · {p.use}</div></div><Badge status={p.status}/><ChevronRight size={12} className="text-gray-600 shrink-0"/></div>))}
+            {mine.length===0&&<div className="px-5 py-8 text-center text-gray-600 text-sm">No submissions yet</div>}
+          </div>
+        </div>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-800 font-bold text-white text-sm">Recent Activity</div>
+          <div className="divide-y divide-gray-800">
+            {(audit||[]).slice(0,5).map(a=>(<div key={a.id} className="px-5 py-3.5 flex items-start gap-3"><div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${a.act==="APPROVED"?"bg-teal-400":a.act==="REJECTED"?"bg-red-400":"bg-amber-400"}`}/><div className="flex-1 min-w-0"><div className="text-sm text-gray-300 truncate">{a.detail}</div><div className="text-xs text-gray-600 font-mono mt-0.5">{a.actor}</div></div></div>))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DigitizePage({ go, parcels, setParcels, user }) {
+  if(!user||user.role==="public")return<AuthWall go={go} role="surveyor"/>;
+  const [step,setStep]=useState(1),[ photoSrc,setPhotoSrc]=useState(null),[ gcps,setGcps]=useState([]),[ gcpMode,setGcpMode]=useState("img"),[ pendingG,setPendingG]=useState(null),[ tracePts,setTracePts]=useState([]),[ submitting,setSubmit]=useState(false);
+  const [form,setForm]=useState({num:"",owner:"",use:"Agricultural",tenure:"Freehold",sub:"Narok North",notes:""});
+  const stepsLabels=["Upload","Georeference","Trace","Attributes","Review & Submit"];
+  function handleFile(files){const f=files[0];if(!f)return;const r=new FileReader();r.onload=e=>{setPhotoSrc(e.target.result);setStep(2);};r.readAsDataURL(f);}
+  function clickOnPhoto(e){if(gcpMode!=="img")return;const r=e.currentTarget.getBoundingClientRect();const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;setPendingG({imgX:x,imgY:y});setGcpMode("map");}
+  function clickOnMapForGcp(){if(gcpMode!=="map"||!pendingG)return;const lng=B.w0+pendingG.imgX*(B.w1-B.w0)+(Math.random()-0.5)*0.02,lat=B.n-pendingG.imgY*(B.n-B.s)+(Math.random()-0.5)*0.01;setGcps(g=>[...g,{...pendingG,mapLng:lng,mapLat:lat}]);setPendingG(null);setGcpMode("img");}
+  function doSubmit(){if(!form.num||!form.owner)return;setSubmit(true);setTimeout(()=>{const newP={id:"p"+Date.now(),num:form.num,owner:form.owner,idNo:"—",addr:form.sub,use:form.use,date:null,area:12000,status:"pending",tenure:form.tenure,encumb:"None",sub:form.sub,ring:[[35.910,-1.070],[35.922,-1.070],[35.922,-1.080],[35.910,-1.080]],by:user.id,photos:[photoSrc].filter(Boolean),docs:[],note:form.notes};setParcels(p=>[...p,newP]);setSubmit(false);setStep(1);setPhotoSrc(null);setGcps([]);setTracePts([]);setForm({num:"",owner:"",use:"Agricultural",tenure:"Freehold",sub:"Narok North",notes:""});go("dashboard");},1800);}
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-6">
+      <button onClick={()=>step>1?setStep(s=>s-1):go("dashboard")} className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-5 transition-colors"><ArrowLeft size={14}/>{step>1?"Back":"Dashboard"}</button>
+      <h1 className="text-xl font-bold text-white mb-6">Digitize Parcel Map</h1>
+      <div className="flex items-center mb-8 overflow-x-auto gap-0">
+        {stepsLabels.map((s,i)=>(<div key={s} className="flex items-center"><div className={`flex items-center gap-2 shrink-0 ${i+1===step?"text-teal-400":i+1<step?"text-teal-600":"text-gray-600"}`}><div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 shrink-0 ${i+1===step?"border-teal-400 bg-teal-400/10":i+1<step?"border-teal-600 bg-teal-600 text-white border-none":"border-gray-700"}`}>{i+1<step?<Check size={11}/>:i+1}</div><span className="text-xs font-medium hidden sm:block">{s}</span></div>{i<stepsLabels.length-1&&<div className={`w-6 md:w-10 h-px mx-2 shrink-0 ${i+1<step?"bg-teal-600":"bg-gray-800"}`}/>}</div>))}
+      </div>
+      {step===1&&(<div><div className="border-2 border-dashed border-gray-700 hover:border-teal-500 rounded-2xl p-14 text-center cursor-pointer transition-colors" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files);}} onClick={()=>document.getElementById("dig_file").click()}><Camera size={44} className="text-teal-400 mx-auto mb-4"/><h3 className="text-white font-bold mb-2">Photograph or upload hardcopy map</h3><p className="text-gray-500 text-sm mb-5">Drag & drop or tap to browse · JPG, PNG, TIFF, PDF</p><span className="bg-teal-500 hover:bg-teal-400 text-black font-bold text-sm px-6 py-2.5 rounded-lg">Choose File</span></div><input id="dig_file" type="file" accept="image/*,application/pdf" capture="environment" className="hidden" onChange={e=>handleFile(e.target.files)}/></div>)}
+      {step===2&&photoSrc&&(<div><div className="grid md:grid-cols-2 gap-4 mb-4"><div><div className={`text-sm font-medium mb-2 ${gcpMode==="img"?"text-teal-400":"text-gray-500"}`}>{gcpMode==="img"?"① Click a recognizable point on the photo":"✓ Photo point set — now click the map"}</div><div className="bg-gray-800 rounded-xl overflow-hidden relative" style={{height:280}}><img src={photoSrc} alt="map scan" style={{width:"100%",height:"100%",objectFit:"contain",cursor:gcpMode==="img"?"crosshair":"default"}} onClick={clickOnPhoto}/>{gcps.map((g,i)=>(<div key={i} style={{position:"absolute",left:g.imgX*100+"%",top:g.imgY*100+"%",transform:"translate(-50%,-50%)"}} className="w-5 h-5 border-2 border-yellow-400 rounded-full bg-yellow-400/20 flex items-center justify-center text-yellow-400 text-[8px] font-bold">{i+1}</div>))}{pendingG&&(<div style={{position:"absolute",left:pendingG.imgX*100+"%",top:pendingG.imgY*100+"%",transform:"translate(-50%,-50%)"}} className="w-5 h-5 border-2 border-white rounded-full bg-white/20 animate-pulse"/>)}</div></div><div><div className={`text-sm font-medium mb-2 ${gcpMode==="map"?"text-teal-400":"text-gray-500"}`}>{gcpMode==="map"?"② Click matching location on reference map":"Waiting for photo click…"}</div><MapCanvas parcels={parcels.filter(p=>p.status==="approved").slice(0,5)} tool="select" height={280} onSelect={()=>gcpMode==="map"&&clickOnMapForGcp()}/></div></div><div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center justify-between flex-wrap gap-3"><div className="flex items-center gap-2 flex-wrap">{gcps.map((_,i)=>(<span key={i} className="bg-yellow-400/10 border border-yellow-400/30 text-yellow-400 text-xs font-mono px-2 py-1 rounded-lg">GCP{i+1} ✓</span>))}{gcps.length<3&&<span className="text-gray-500 text-xs">Need {3-gcps.length} more GCP{3-gcps.length!==1?"s":""}</span>}</div><div className="flex gap-2"><button onClick={()=>setGcps([])} className="text-xs border border-gray-700 text-gray-500 hover:text-white px-3 py-1.5 rounded-lg transition-colors">Reset GCPs</button>{gcps.length>=3&&(<button onClick={()=>setStep(3)} className="bg-teal-500 hover:bg-teal-400 text-black font-bold text-xs px-4 py-1.5 rounded-lg transition-colors">Compute Transform →</button>)}</div></div></div>)}
+      {step===3&&photoSrc&&(<div className="grid md:grid-cols-2 gap-4"><div><div className="text-sm font-medium text-teal-400 mb-2">Click to trace parcel boundary vertices</div><div className="bg-gray-800 rounded-xl overflow-hidden relative" style={{height:320}}><img src={photoSrc} alt="scan" style={{width:"100%",height:"100%",objectFit:"contain"}}/><svg style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}>{tracePts.length>1&&(<polyline points={tracePts.map(p=>`${p.x}%,${p.y}%`).join(" ")} stroke="#00d4aa" strokeWidth="2" fill="rgba(0,212,170,0.1)" strokeDasharray="5,3"/>)}{tracePts.map((p,i)=>(<circle key={i} cx={p.x+"%"} cy={p.y+"%"} r="5" fill={i===0?"white":"#00d4aa"}/>))}</svg><div style={{position:"absolute",inset:0,cursor:"crosshair"}} onClick={e=>{const r=e.currentTarget.getBoundingClientRect();setTracePts(pts=>[...pts,{x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100}]);}} onDoubleClick={()=>{if(tracePts.length>=3)setStep(4);}}/></div></div><div className="flex flex-col gap-3"><div className="bg-gray-900 border border-gray-800 rounded-xl p-4"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Trace Status</div><div className="text-2xl font-bold font-mono text-teal-400 mb-1">{tracePts.length}</div><div className="text-xs text-gray-500">vertices placed</div>{tracePts.length>=3&&<div className="mt-2 text-xs text-teal-400">✓ Polygon valid — double-click to close</div>}{tracePts.length<3&&<div className="mt-2 text-xs text-gray-500">Need at least 3 vertices</div>}</div><button onClick={()=>setTracePts([])} className="w-full border border-gray-700 text-gray-400 hover:text-white text-sm py-2.5 rounded-xl transition-colors">Clear Points</button>{tracePts.length>=3&&(<button onClick={()=>setStep(4)} className="w-full bg-teal-500 hover:bg-teal-400 text-black font-bold text-sm py-2.5 rounded-xl transition-colors">Next →</button>)}</div></div>)}
+      {step===4&&(<div className="max-w-lg"><h3 className="font-bold text-white text-sm mb-5">Parcel Attributes</h3><div className="flex flex-col gap-4"><Inp label="Parcel Reference Number *" value={form.num} onChange={v=>setForm(f=>({...f,num:v}))} placeholder="NAROK/CENTRAL/XXXX"/><Inp label="Owner Full Name *" value={form.owner} onChange={v=>setForm(f=>({...f,owner:v}))} placeholder="Full legal name"/><div className="grid grid-cols-2 gap-3"><Sel label="Land Use" value={form.use} onChange={v=>setForm(f=>({...f,use:v}))} opts={["Agricultural","Residential","Commercial","Industrial","Conservation"]}/><Sel label="Tenure" value={form.tenure} onChange={v=>setForm(f=>({...f,tenure:v}))} opts={["Freehold","Leasehold 99yr","Leasehold 50yr","Customary","Government"]}/></div><Sel label="Sub-county" value={form.sub} onChange={v=>setForm(f=>({...f,sub:v}))} opts={["Narok North","Narok South","Narok East","Narok West","Transmara East","Transmara West"]}/><div><label className="block text-xs text-gray-500 font-mono uppercase tracking-wider mb-1.5">Notes</label><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Any remarks…" rows={3} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-teal-500 resize-none"/></div><button onClick={()=>{if(!form.num||!form.owner)return;setStep(5);}} className="w-full bg-teal-500 hover:bg-teal-400 text-black font-bold py-3 rounded-xl text-sm transition-colors">Review Submission →</button></div></div>)}
+      {step===5&&(<div className="max-w-lg"><h3 className="font-bold text-white text-sm mb-5">Review Before Submitting</h3><div className="bg-gray-900 border border-gray-800 rounded-2xl divide-y divide-gray-800 mb-5">{[["Parcel Number",form.num],["Owner",form.owner],["Land Use",form.use],["Tenure",form.tenure],["Sub-county",form.sub],["Trace Vertices",tracePts.length+" points"],["GCPs",gcps.length+" control points"],["Photo",photoSrc?"✓ Attached":"None"]].map(([k,v])=>(<div key={k} className="flex items-center justify-between px-5 py-3 gap-4"><span className="text-xs text-gray-500 font-mono uppercase tracking-wider">{k}</span><span className="text-sm text-white">{v}</span></div>))}</div><p className="text-xs text-gray-500 mb-4">Submission will enter the admin review queue before being published to the public map.</p><button onClick={doSubmit} disabled={submitting} className="w-full bg-teal-500 hover:bg-teal-400 disabled:opacity-60 text-black font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors">{submitting?<><RefreshCw size={14} className="animate-spin"/>Submitting…</>:<><Upload size={14}/>Submit for Admin Review</>}</button></div>)}
+    </div>
+  );
+}
+
+function EditorPage({ go, parcels, setParcels, user }) {
+  if(!user||user.role==="public")return<AuthWall go={go} role="surveyor"/>;
+  const [tool,setTool]=useState("select"),[ selP,setSelP]=useState(null),[ drawPts,setDrawPts]=useState([]),[ meas,setMeas]=useState({area:null,perim:null,bearing:null}),[ bufDist,setBufDist]=useState(50),[ bufOn,setBufOn]=useState(false),[ subN,setSubN]=useState(2),[ subMeth,setSubMeth]=useState("Equal Area"),[ subRes,setSubRes]=useState(null),[ msg,setMsg]=useState(null);
+  function notify(m,err){setMsg({t:m,e:err});setTimeout(()=>setMsg(null),2800);}
+  function calcMeasure(pts){if(pts.length<2)return;const S=180;let perim=0;for(let i=0;i<pts.length-1;i++){const dx=(pts[i+1].x-pts[i].x)*S,dy=(pts[i+1].y-pts[i].y)*S;perim+=Math.sqrt(dx*dx+dy*dy);}let area=0;for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;area+=pts[i].x*pts[j].y-pts[j].x*pts[i].y;}area=Math.abs(area/2)*S*S;const n=pts.length-1,dx=(pts[n].x-pts[n-1].x)*S,dy=(pts[n].y-pts[n-1].y)*S,bear=((Math.atan2(dx,-dy)*180/Math.PI)+360)%360;setMeas({area,perim,bearing:bear});}
+  function handleToolAction({type,x,y}){if(type==="POINT"){const np=[...drawPts,{x,y}];setDrawPts(np);if(tool==="measure")calcMeasure(np);}}
+  function changeTool(t){setTool(t);setDrawPts([]);setSubRes(null);setBufOn(false);setMeas({area:null,perim:null,bearing:null});}
+  function runSubdivide(){if(!selP)return notify("Select a parcel on the map first",true);const totalHa=(selP.area||10000)/10000,each=totalHa/subN;if(each<0.05)return notify("Sub-parcels below 0.05 ha minimum",true);const res=Array.from({length:subN},(_,i)=>({id:`${selP.num}-${String.fromCharCode(65+i)}`,ha:(subMeth==="By Ratio"?totalHa*(i===0?0.6:0.4/Math.max(1,subN-1)):each).toFixed(3)}));setSubRes(res);notify(`✓ ${subN} sub-parcels created`);}
+  function exportGeoJSON(){const fc={type:"FeatureCollection",features:parcels.map(p=>({type:"Feature",properties:{parcel_number:p.num,owner:p.owner,land_use:p.use,status:p.status,area_sqm:p.area},geometry:{type:"Polygon",coordinates:p.ring?[[...p.ring,p.ring[0]]]:[]}}))} ;const blob=new Blob([JSON.stringify(fc,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="narok_parcels.geojson";a.click();URL.revokeObjectURL(url);notify("GeoJSON exported");}
+  const TOOLS=[{id:"select",I:Eye,l:"Select"},{id:"draw",I:Square,l:"Draw"},{id:"split",I:Scissors,l:"Subdivide"},{id:"measure",I:Ruler,l:"Measure"},{id:"buffer",I:Circle,l:"Buffer"}];
+  const hints={select:"👆 Click a parcel to select it and view its data",draw:"⬡ Click to add polygon vertices · Undo / Close when done",split:"✂ Select a parcel, set parameters, click Run Subdivision",measure:"📐 Click points on the map to measure area & perimeter live",buffer:"◎ Select a parcel, enter distance, click Generate Buffer"};
+  return (
+    <div className="flex flex-col" style={{height:"calc(100vh - 56px)"}}>
+      <div className="bg-gray-900 border-b border-gray-800 px-4 py-2 flex items-center gap-2 flex-wrap shrink-0">
+        <span className="text-xs text-gray-600 font-mono mr-1">TOOLS</span>
+        {TOOLS.map(t=>(<button key={t.id} onClick={()=>changeTool(t.id)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${tool===t.id?"bg-teal-500/10 text-teal-400 border-teal-500/40":"bg-gray-800 text-gray-400 hover:text-white border-gray-700"}`}><t.I size={12}/>{t.l}</button>))}
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={()=>setDrawPts([])} className="text-xs text-gray-500 hover:text-white px-2 py-1.5 rounded border border-gray-700 transition-colors"><Trash2 size={11} className="inline mr-1"/>Clear</button>
+          <button onClick={exportGeoJSON} className="flex items-center gap-1 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-lg transition-colors"><Download size={11}/>GeoJSON</button>
+        </div>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden"><MapCanvas parcels={parcels} selectedId={selP?.id} tool={tool} drawPoints={drawPts} bufferParcel={bufOn?selP:null} bufferDist={bufDist} onSelect={p=>{setSelP(p);}} onToolAction={handleToolAction} height="100%"/></div>
+        <div className="w-64 bg-gray-900 border-l border-gray-800 overflow-y-auto shrink-0 p-3 flex flex-col gap-3">
+          <div className="bg-gray-800 rounded-xl p-3 text-xs text-gray-400 leading-relaxed">{hints[tool]}</div>
+          {(tool==="measure"||tool==="draw")&&(<div className="bg-gray-800 rounded-xl p-4"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Measurements</div><div className="flex flex-col gap-2 text-sm mb-3">{[["Area",meas.area!=null?fmtArea(meas.area):"—"],["Perimeter",meas.perim!=null?meas.perim.toFixed(1)+" m":"—"],["Bearing",meas.bearing!=null?meas.bearing.toFixed(2)+"°":"—"],["Vertices",drawPts.length]].map(([k,v])=>(<div key={k} className="flex justify-between"><span className="text-gray-500">{k}</span><span className="text-teal-400 font-mono text-xs">{v}</span></div>))}</div><div className="flex gap-2"><button onClick={()=>{const p=[...drawPts];p.pop();setDrawPts(p);if(p.length>=2)calcMeasure(p);}} className="flex-1 text-xs border border-gray-700 rounded-lg py-1.5 text-gray-400 hover:text-white transition-colors">↩ Undo</button><button onClick={()=>{if(drawPts.length>=3)calcMeasure(drawPts);}} className="flex-1 text-xs border border-gray-700 rounded-lg py-1.5 text-gray-400 hover:text-white transition-colors">⬡ Close</button></div></div>)}
+          {tool==="split"&&(<div className="bg-gray-800 rounded-xl p-4"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Subdivision</div><div className="flex flex-col gap-3"><div><label className="text-xs text-gray-600 block mb-1">Selected</label><div className="text-xs font-mono text-teal-400 bg-gray-900 rounded-lg px-2 py-2 truncate">{selP?.num||"None selected"}</div></div><div><label className="text-xs text-gray-600 block mb-1">Sub-parcels</label><input type="number" value={subN} onChange={e=>setSubN(Math.max(2,parseInt(e.target.value)||2))} min="2" max="10" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:border-teal-500"/></div><div><label className="text-xs text-gray-600 block mb-1">Method</label><select value={subMeth} onChange={e=>setSubMeth(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-xs text-white focus:outline-none">{["Equal Area","By Ratio","By Line"].map(o=><option key={o}>{o}</option>)}</select></div><button onClick={runSubdivide} className="w-full bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs py-2 rounded-lg transition-colors">▶ Run Subdivision</button>{subRes&&(<div className="flex flex-col gap-1.5">{subRes.map(r=>(<div key={r.id} className="flex justify-between bg-gray-900 rounded-lg px-3 py-2"><span className="text-xs font-mono text-teal-400 truncate">{r.id}</span><span className="text-xs text-gray-400 shrink-0 ml-2">{r.ha} ha</span></div>))}</div>)}</div></div>)}
+          {tool==="buffer"&&(<div className="bg-gray-800 rounded-xl p-4"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Buffer Analysis</div><div className="flex flex-col gap-3"><div><label className="text-xs text-gray-600 block mb-1">Parcel</label><div className="text-xs font-mono text-teal-400 bg-gray-900 rounded-lg px-2 py-2 truncate">{selP?.num||"None selected"}</div></div><div><label className="text-xs text-gray-600 block mb-1">Distance (m)</label><input type="number" value={bufDist} onChange={e=>{setBufDist(parseInt(e.target.value)||50);setBufOn(false);}} min="1" max="5000" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:border-teal-500"/></div><button onClick={()=>{if(!selP)return notify("Select a parcel first",true);setBufOn(true);notify(`✓ ${bufDist}m buffer generated`);}} className="w-full bg-blue-500 hover:bg-blue-400 text-white font-bold text-xs py-2 rounded-lg transition-colors">◎ Generate Buffer</button>{bufOn&&selP&&<div className="text-xs text-blue-400 text-center">Buffer visible on map</div>}</div></div>)}
+          {selP&&tool==="select"&&(<div className="bg-gray-800 rounded-xl p-4"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Selected Parcel</div><div className="font-mono text-xs text-teal-400 mb-1 truncate">{selP.num}</div><div className="text-sm font-medium text-white mb-0.5">{selP.owner}</div><div className="text-xs text-gray-400 mb-2">{selP.use} · {fmtArea(selP.area)}</div><Badge status={selP.status}/></div>)}
+          <div className="bg-gray-800 rounded-xl p-4"><div className="text-xs text-gray-500 font-mono uppercase tracking-wider mb-3">Export</div><div className="flex flex-col gap-2"><button onClick={exportGeoJSON} className="w-full border border-gray-700 hover:border-teal-500/50 text-gray-400 hover:text-teal-400 text-xs py-2 rounded-lg transition-colors flex items-center justify-center gap-1"><Download size={10}/>GeoJSON</button><button onClick={()=>notify("Shapefile — add shp-write library for full support")} className="w-full border border-gray-700 hover:border-teal-500/50 text-gray-400 hover:text-teal-400 text-xs py-2 rounded-lg transition-colors flex items-center justify-center gap-1"><Download size={10}/>Shapefile (.shp)</button></div></div>
+        </div>
+      </div>
+      {msg&&<Toast msg={msg.t} err={msg.e}/>}
+    </div>
+  );
+}
+
+function AdminUsersPage({ go, users, setUsers, user, addAudit }) {
+  if(!user||user.role!=="admin")return<AuthWall go={go} role="admin"/>;
+  const [editId,setEditId]=useState(null),[ msg,setMsg]=useState(null);
+  const roles=["public","surveyor","admin"];
+  function notify(m){setMsg(m);setTimeout(()=>setMsg(null),2500);}
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6">
+      <h1 className="text-xl font-bold text-white mb-1">User Management</h1>
+      <p className="text-gray-400 text-sm mb-6">Manage user roles and access levels across the platform</p>
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between"><span className="font-bold text-white text-sm">{users.length} Users</span><button className="text-xs bg-teal-500/10 text-teal-400 border border-teal-500/30 px-3 py-1.5 rounded-lg hover:bg-teal-500/20 transition-colors">+ Invite User</button></div>
+        <div className="divide-y divide-gray-800">
+          {users.map(u=>(<div key={u.id} className="px-5 py-4 flex items-center gap-3"><div className="w-9 h-9 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center text-teal-400 font-bold text-sm shrink-0">{u.name.charAt(0)}</div><div className="flex-1 min-w-0"><div className="font-medium text-white text-sm">{u.name}</div><div className="text-xs text-gray-500 font-mono">{u.email}</div></div><span className="text-xs text-gray-600 hidden md:block shrink-0">{u.joined}</span>{editId===u.id?(<div className="flex items-center gap-2"><select defaultValue={u.role} onChange={e=>{const nr=e.target.value;setUsers(us=>us.map(x=>x.id===u.id?{...x,role:nr}:x));addAudit?.("ROLE_CHANGE",`${u.email} role changed to ${nr}`,user.email);setEditId(null);notify(`✓ ${u.name} → ${nr}`);}} className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs text-white focus:outline-none">{roles.map(r=><option key={r}>{r}</option>)}</select><button onClick={()=>setEditId(null)} className="text-gray-500 hover:text-white"><X size={13}/></button></div>):(<div className="flex items-center gap-2"><RoleBadge role={u.role}/><button onClick={()=>setEditId(u.id)} className="text-gray-600 hover:text-teal-400 transition-colors"><Edit3 size={13}/></button></div>)}</div>))}
+        </div>
+      </div>
+      {msg&&<Toast msg={msg}/>}
+    </div>
+  );
+}
+
+function AdminReviewPage({ go, parcels, setParcels, user, addAudit }) {
+  if(!user||user.role!=="admin")return<AuthWall go={go} role="admin"/>;
+  const [msg,setMsg]=useState(null);
+  const pending=parcels.filter(p=>p.status==="pending"||p.status==="draft");
+  function notify(m,e){setMsg({t:m,e});setTimeout(()=>setMsg(null),2500);}
+  function approve(id){setParcels(ps=>ps.map(p=>p.id===id?{...p,status:"approved",date:new Date().toISOString().slice(0,10)}:p));addAudit?.("APPROVED",`Parcel ${id} approved`,user.email);notify("✓ Parcel approved and published");}
+  function reject(id){setParcels(ps=>ps.map(p=>p.id===id?{...p,status:"rejected"}:p));addAudit?.("REJECTED",`Parcel ${id} rejected`,user.email);notify("Parcel rejected",true);}
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-6">
+      <h1 className="text-xl font-bold text-white mb-1">Review Queue</h1>
+      <p className="text-gray-400 text-sm mb-6">{pending.length>0?<><span className="text-amber-400 font-mono">{pending.length}</span> submissions awaiting review</>:"All submissions reviewed"}</p>
+      {pending.length===0&&(<div className="text-center py-16"><CheckCircle size={44} className="text-teal-600 mx-auto mb-3"/><p className="text-gray-500">Queue is empty — all parcels reviewed</p></div>)}
+      <div className="flex flex-col gap-4">
+        {pending.map(p=>(<div key={p.id} className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden"><div className="p-5 grid md:grid-cols-5 gap-4"><div className="md:col-span-3"><div className="flex items-center gap-3 mb-3"><Badge status={p.status}/><span className="font-mono text-sm text-teal-400">{p.num}</span></div><div className="grid grid-cols-2 gap-x-6 gap-y-2">{[["Owner",p.owner],["Land Use",p.use],["Area",fmtArea(p.area)],["Tenure",p.tenure],["Sub-county",p.sub],["Submitted by",p.by||"—"]].map(([k,v])=>(<div key={k}><span className="text-gray-500 text-xs">{k}: </span><span className="text-sm text-white">{v}</span></div>))}</div>{p.note&&<div className="mt-3 text-xs text-gray-500 italic">{p.note}</div>}</div><div className="md:col-span-2"><MapCanvas parcels={[p]} selectedId={p.id} tool="select" height={150}/></div></div><div className="px-5 py-3 bg-gray-800/40 border-t border-gray-800 flex items-center justify-end gap-2"><button onClick={()=>reject(p.id)} className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold px-4 py-2 rounded-lg transition-colors"><XCircle size={12}/>Reject</button><button onClick={()=>approve(p.id)} className="flex items-center gap-1.5 bg-teal-500/10 hover:bg-teal-500/20 text-teal-400 border border-teal-500/30 text-xs font-bold px-4 py-2 rounded-lg transition-colors"><CheckCircle size={12}/>Approve & Publish</button></div></div>))}
+      </div>
+      {msg&&<Toast msg={msg.t} err={msg.e}/>}
+    </div>
+  );
+}
+
+function AuditPage({ go, audit, user }) {
+  if(!user||user.role!=="admin")return<AuthWall go={go} role="admin"/>;
+  const ACT_COL={APPROVED:"text-teal-400",REJECTED:"text-red-400",SUBMITTED:"text-amber-400",ROLE_CHANGE:"text-blue-400"};
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6">
+      <button onClick={()=>go("dashboard")} className="flex items-center gap-2 text-gray-400 hover:text-white text-sm mb-5 transition-colors"><ArrowLeft size={14}/>Dashboard</button>
+      <h1 className="text-xl font-bold text-white mb-6">Audit Log <span className="text-gray-600 font-mono text-sm ml-2">{audit.length} entries</span></h1>
+      <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+        <div className="divide-y divide-gray-800">
+          {audit.map(a=>(<div key={a.id} className="px-5 py-4 flex items-start gap-4"><span className={`text-xs font-mono font-bold shrink-0 mt-0.5 ${ACT_COL[a.act]||"text-gray-400"}`}>{a.act}</span><div className="flex-1 min-w-0"><div className="text-sm text-gray-200">{a.detail}</div><div className="text-xs text-gray-500 font-mono mt-0.5">{a.actor}</div></div><div className="text-xs text-gray-600 font-mono shrink-0">{new Date(a.ts).toLocaleString("en-KE",{dateStyle:"short",timeStyle:"short"})}</div></div>))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [page,setPage]=useState("landing"),[ user,setUser]=useState(null),[ parcels,setParcels]=useState(SEED_PARCELS),[ users,setUsers]=useState(SEED_USERS),[ audit,setAudit]=useState(SEED_AUDIT),[ parcel,setParcel]=useState(null);
+  function go(p,data){setPage(p);if(data?.parcel)setParcel(data.parcel);window.scrollTo(0,0);}
+  function addAudit(act,detail,actor){setAudit(a=>[{id:"a"+Date.now(),act,detail,actor:actor||user?.email||"—",ts:new Date().toISOString()},...a]);}
+  const pages={landing:<LandingPage go={go} user={user}/>,login:<LoginPage go={go} setUser={setUser}/>,map:<MapPage go={go} parcels={parcels} setPageParcel={setParcel}/>,parcel:<ParcelDetailPage go={go} parcel={parcel} user={user}/>,dashboard:<DashboardPage go={go} parcels={parcels} user={user} audit={audit}/>,digitize:<DigitizePage go={go} parcels={parcels} setParcels={setParcels} user={user}/>,editor:<EditorPage go={go} parcels={parcels} setParcels={setParcels} user={user}/>,"admin-users":<AdminUsersPage go={go} users={users} setUsers={setUsers} user={user} addAudit={addAudit}/>,"admin-review":<AdminReviewPage go={go} parcels={parcels} setParcels={setParcels} user={user} addAudit={addAudit}/>,audit:<AuditPage go={go} audit={audit} user={user}/>};
+  return(
+    <div className="min-h-screen bg-gray-950 text-gray-100" style={{fontFamily:"'Sora',sans-serif"}}>
+      {page!=="login"&&<Nav page={page} go={go} user={user} setUser={setUser}/>}
+      <main>{pages[page]??pages.landing}</main>
+    </div>
+  );
+}
